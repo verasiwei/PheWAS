@@ -1,0 +1,89 @@
+# PheWAS Pipeline
+
+This pipeline only cleans the data based on summary level of phecode/icd9 data(Binary value of whether frequency of each phecode>1) up to now. Answer the questions prompted on the screen and you could just input the original files you have.
+
+## Step 1:
+
+```
+$ git clone https://github.com/verasiwei/PheWAS
+```
+
+## Step 2:
+
+Exclusion criteria: When some subjects have some cormobidity diseases or phenotypes related with a specific phecode, such subjects cannot be regarded as the control for this phecode. add_exclusion.R add this exclusion criteria to the Phecode table and produce NA to those subjects cannot be regarded as control. The substring function involved in the script is due to the initial "X" label of each phecode in a specific phecode table. 
+
+Notations:
+
+pheno_dat: phenotype file
+
+dir: your directory
+
+```
+$ Rscript add_exclusion.R pheno_dat dir
+```
+
+
+## Step 3:
+
+If you already have case/control, just skip this step. But if the case/control or inclusion/exclusion criteria are decided according to the icd9 codes or phecodes criteria, cd to your terminal and it will save a file which includes the case and control status that will be used as a "genotype" file in phewas
+
+Notations:
+
+pheno_dat: phenotype file
+
+demo_dat: demographic file
+
+code_case: icd9 or phecode to define cases
+
+code_control: icd9 or phecode to be used in exclusion of controls
+
+icd9_phe: whether your phenotype files is icd9 or phecode
+
+dir: where you want to save the outputs
+
+```
+$ Rscript selection.R pheno_dat demo_dat code_case code_control icd9_phe dir
+```
+
+## Step 4:
+
+If you want to do propensity score matching, cd to your terminal and it will save a file which includes the case and control status that will be used as a "genotype" file in phewas
+
+Notations:
+
+pheno_dat: phenotype file
+
+demo_dat: demographic file
+
+genotypes: genotype file
+
+dir: where you want to save the outputs
+
+ratio: the ratio of matching
+
+```
+$ Rscript matching.R pheno_dat demo_dat genotypes dir ratio
+```
+
+## Step 5:
+
+On your terminal, cd to your directory where you cloned the repository
+
+```
+$ python pre_input.py
+```
+
+And answer each question follow the instructions prompted on the screen.
+
+Notice:
+
+When you enter each answer, they should include quotation markers if it is in Python 2.7+ environment, you do not need include quotation markers if it is in Python 3.6+ environment. 
+
+When you enter the covariates you want to adjust or the inclusion or exclusion icd9 codes criteria, you should separated each variable by comma.
+
+This pipeline can still handle the situation if your population is very large, just answer the question whether your population is large on the screen.
+
+![Alt text](https://github.com/verasiwei/PheWAS/blob/master/example.png)
+
+
+

@@ -1,0 +1,26 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1555597824675.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "CF16744E",
+    "lastKnownWriteTime" : 1555616044,
+    "last_content_update" : 1555616046270,
+    "path" : "~/PheWASExtension/R/matching.R",
+    "project_path" : "R/matching.R",
+    "properties" : {
+        "cursorPosition" : "35,0",
+        "scrollLine" : "0",
+        "tempName" : "Untitled1"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 6,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

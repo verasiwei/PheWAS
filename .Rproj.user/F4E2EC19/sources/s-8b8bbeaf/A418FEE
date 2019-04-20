@@ -1,0 +1,26 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1555613264932.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "A418FEE",
+    "lastKnownWriteTime" : 1555617998,
+    "last_content_update" : 1555617998805,
+    "path" : "~/PheWASExtension/R/phewas_prereq.R",
+    "project_path" : "R/phewas_prereq.R",
+    "properties" : {
+        "cursorPosition" : "9,10",
+        "scrollLine" : "0",
+        "tempName" : "Untitled1"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 8,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

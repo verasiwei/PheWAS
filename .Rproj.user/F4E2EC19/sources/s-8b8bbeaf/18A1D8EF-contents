@@ -1,0 +1,879 @@
+#!/usr/bin/env Rscript
+#===JAK2=======
+#TBILab Siwei Zhang
+#January, 2019
+
+#=========================Call JAK2 V617F Mutation Carriers
+#===combine and calculate intensity data===#
+files=file.path("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA",
+                c("exm737085_batch1.csv","exm737085_batch2.csv","exm737085_batch3.csv",
+                  "exm737085_batch4.csv","exm737085_batch5.csv"))
+
+orig_dat=lapply(files, function(x) read.table(x,stringsAsFactors = FALSE,header = TRUE,sep = ",",
+                                              colClasses = c("NULL",rep("character",3),rep("NULL",13),"character",rep("NULL",14),rep("character",5))))
+
+intensity_dat=data.frame()
+for (i in 1:5) {
+  orig_dat[[i]][,"theta"]=as.numeric(orig_dat[[i]][,"theta"])
+  orig_dat[[i]][,"b_allele_freq"]=as.numeric(orig_dat[[i]][,"b_allele_freq"])
+  orig_dat[[i]][,"x"]=as.numeric(orig_dat[[i]][,"x"])
+  orig_dat[[i]][,"y"]=as.numeric(orig_dat[[i]][,"y"])
+  orig_dat[[i]][,"x_raw"]=as.numeric(orig_dat[[i]][,"x_raw"])
+  orig_dat[[i]][,"y_raw"]=as.numeric(orig_dat[[i]][,"y_raw"])
+  orig_dat[[i]][,"1-theta"]=1-orig_dat[[i]][,"theta"]
+  orig_dat[[i]][,"1-BAF"]=1-orig_dat[[i]][,"b_allele_freq"]
+  orig_dat[[i]][,"x/(x+y)"]=orig_dat[[i]][,"x"]/(orig_dat[[i]][,"x"]+orig_dat[[i]][,"y"])
+  orig_dat[[i]][,"x_raw/(x_raw+y_raw)"]=orig_dat[[i]][,"x_raw"]/(orig_dat[[i]][,"x_raw"]+orig_dat[[i]][,"y_raw"])
+  intensity_dat=rbind(intensity_dat,orig_dat[[i]])
+}
+intensity_dat=intensity_dat[which(!is.na(intensity_dat$theta)),]
+intensity_dat=intensity_dat[!duplicated(intensity_dat$grid),]
+
+#===merge with demographics data(Age at DNA sampling)===#
+#demographic_dat=function(){
+#  dat=load("GRID_DEMOGRAPHICS.Aug2017.RData")
+#  return(get(dat))
+#}
+#demo_dat=demographic_dat()
+library(readxl)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+demo_dat=read_excel("Xu_PM_Phenotype.2018April25.xlsx")
+colnames(demo_dat)[1]="grid"
+demo_dat=demo_dat[!duplicated(demo_dat$grid),]
+intensity_dat=merge(intensity_dat,demo_dat[,c("grid","DOB","SHIFTED_SAMPLE_ACCEPTED_DT")],by="grid",sort=FALSE)
+intensity_dat$age=as.numeric(floor((as.Date(intensity_dat$SHIFTED_SAMPLE_ACCEPTED_DT)-as.Date(intensity_dat$DOB))/365))
+
+#===fit distribution for the people aged at sampling <=40===#
+library(MASS)
+intensity_dat1=subset(intensity_dat,age<=40)
+intensity_dat2=subset(intensity_dat,age>40)
+#pvalue=c(0.90,0.95,0.99,0.995,0.999)
+#estimate mean and sd
+set.seed(123)
+fit=huber(intensity_dat1$`1-theta`,k=1.5)
+#calculate alpha and beta for a beta distribution from mean and sd estimated from huber
+mean=as.numeric(fit[[1]])
+sd=as.numeric(fit[[2]])
+alpha=((1-mean)/(sd^2)-1/mean)*(mean^2)
+beta=alpha*(1/mean-1)
+
+#if get p-values for each subject from beta distribution
+intensity_dat$p_value=pbeta(intensity_dat$`1-theta`,alpha,beta,lower.tail = FALSE)
+#if get p-values for each subject from normal distribution
+#intensity_dat$p_value=pnorm(intensity_dat$`1-theta`,mean,sd,lower.tail = FALSE)
+
+#round p-value that is 0 to 2.225074e-308(smallest representable number in R), otherwise will be infinite of z
+intensity_dat$p_value[which(intensity_dat$p_value==0)]=2.225074e-308
+#transform p-value to z
+intensity_dat$z=qnorm(intensity_dat$p_value,mean=0,sd=1,lower.tail = FALSE)
+
+
+
+
+
+
+#===read in NGS data===#
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/NGS")
+ngs_dat=read.table("20190109_Jak2Ngs.csv",header = TRUE,sep = ",")
+ngs_dat$GT=as.factor(ifelse(ngs_dat$GT==".",0,1))
+colnames(ngs_dat)[3]="grid"
+ngs_mega=merge(ngs_dat,intensity_dat,by="grid",sort=FALSE)
+#table(ngs_mega$group)
+#write.table(ngs_mega,file = "ngs_z.csv",row.names = FALSE,col.names = TRUE,sep = ",")
+
+#fit logistic regression on NGS(0/1)~z based on 149 NGS data
+log_reg=glm(GT~z,family = binomial(link=logit),data = ngs_mega[,c("GT","z")])
+prob=predict(log_reg,type = "response")
+#library(ROCR)
+#ROCRpred=prediction(prob,ngs_mega$GT)
+#plot_cutoff1=performance(ROCRpred,measure = "tpr",x.measure = "fpr")
+#plot(plot_cutoff1,col="green",main="Beta Distribution")
+#auc1=as.numeric(performance(ROCRpred,measure = "auc")@y.values)
+
+
+#caculate sensitivity and false positive 
+sort_fit=sort(log_reg$fitted.values)
+GT=ngs_mega$GT
+positive=log_reg$fitted[GT==1]
+negative=log_reg$fitted[GT==0]
+sens=NULL
+spec_c=NULL
+for (i in length(sort_fit):1){
+  sens <- c(sens, mean(positive >= sort_fit[i]))
+  spec_c<- c(spec_c, mean(negative >= sort_fit[i]))
+  
+}
+plot(spec_c, sens, xlim = c(0, 1), ylim = c(0, 1), type = "l", 
+     xlab = "false positive rate", ylab = "true positive rate", col = 'blue')
+
+which(1-spec_c+sens==max(1-spec_c+sens))
+positive
+sort_fit
+ngs_mega[75,]
+ngs_mega[75,"z"]
+
+
+#========Unusable!!!!!!!!!!!!!!============================================#
+#cutoff_group_normal=list()
+#for (i in 1:5) {
+#  cutoff_group_normal[[i]]=qnorm(pvalue[i],as.numeric(fit[[1]]),as.numeric(fit[[2]]))  
+#}
+#when p-value is 0.1, cut-off is 0.0431
+#when p-value is 0.05, cut-off is 0.0464
+#when p-value is 0.01, cut-off is 0.0524
+#when p-value is 0.005, cut-off is 0.0546
+#when p-value is 0.001, cut-off is 0.0592
+
+#if set p-value, call carriers of JAK2 V617F mutation
+#intensity_dat$group1=ifelse(intensity_dat$`1-theta`>=cutoff_group_normal[[1]],1,0)
+#intensity_dat$group1=as.factor(intensity_dat$group1)
+#intensity_dat$group2=ifelse(intensity_dat$`1-theta`>=cutoff_group_normal[[2]],1,0)
+#intensity_dat$group2=as.factor(intensity_dat$group2)
+#intensity_dat$group3=ifelse(intensity_dat$`1-theta`>=cutoff_group_normal[[3]],1,0)
+#intensity_dat$group3=as.factor(intensity_dat$group3)
+#intensity_dat$group4=ifelse(intensity_dat$`1-theta`>=cutoff_group_normal[[4]],1,0)
+#intensity_dat$group4=as.factor(intensity_dat$group4)
+#intensity_dat$group5=ifelse(intensity_dat$`1-theta`>=cutoff_group_normal[[5]],1,0)
+#intensity_dat$group5=as.factor(intensity_dat$group5)
+#intensity_dat[,"z_(1-theta)"]=(intensity_dat$`1-theta`-as.numeric(fit[[1]]))/as.numeric(fit[[2]])
+
+#===fit beta distribution for the people aged at sampling <=40===#
+#library(MASS)
+#library(fitdistrplus)
+#set.seed(123)
+#fit=fitdist(intensity_dat1$`1-theta`,"beta")#9.538618, 281.979655
+#summary(fit)
+#cutoff_group_beta=list()
+#for (i in 1:5) {
+#  cutoff_group_beta[[i]]=qbeta(pvalue[i],unname(summary(fit)[["estimate"]][1]),unname(summary(fit)[["estimate"]][2]))
+#}
+#alpha=unname(summary(fit)[["estimate"]][1])
+#beta=unname(summary(fit)[["estimate"]][2])
+#mean_beta=alpha/(alpha+beta)
+#sd_beta=sqrt((alpha*beta)/((alpha+beta)^2)*(alpha+beta+1))
+#intensity_dat$group1=ifelse(intensity_dat$`1-theta`>=cutoff_group_beta[[1]],1,0)
+#intensity_dat$group1=as.factor(intensity_dat$group1)
+#intensity_dat$group2=ifelse(intensity_dat$`1-theta`>=cutoff_group_beta[[2]],1,0)
+#intensity_dat$group2=as.factor(intensity_dat$group2)
+#intensity_dat$group3=ifelse(intensity_dat$`1-theta`>=cutoff_group_beta[[3]],1,0)
+#intensity_dat$group3=as.factor(intensity_dat$group3)
+#intensity_dat$group4=ifelse(intensity_dat$`1-theta`>=cutoff_group_beta[[4]],1,0)
+#intensity_dat$group4=as.factor(intensity_dat$group4)
+#intensity_dat$group5=ifelse(intensity_dat$`1-theta`>=cutoff_group_beta[[5]],1,0)
+#intensity_dat$group5=as.factor(intensity_dat$group5)
+#intensity_dat[,"z_(1-theta)"]=(intensity_dat$`1-theta`-mean_beta)/sd_beta
+
+#===have a look of the graph===#
+table(ngs_mega$GT)
+#if group by 1-theta cut-off
+#intensity_dat$group=as.factor(ifelse(intensity_dat$`1-theta`<=0.076,0,1))
+#if group by z cut-off
+intensity_dat[,"group_z3.77"]=as.factor(ifelse(intensity_dat$z<ngs_mega[which(1-spec_c+sens==max(1-spec_c+sens)),"z"],0,1))
+intensity_dat[,"group_z2.8"]=as.factor(ifelse(intensity_dat$z<2.8,0,1))
+intensity_dat$ngs=as.factor(ifelse(intensity_dat$grid %in% ngs_mega[which(ngs_mega$GT==1),"grid"],1,0))
+table(intensity_dat$group_z2.8)
+table(intensity_dat$group_z3.77)
+library(ggplot2)
+#plot1
+ggplot(intensity_dat,
+       aes(x=age,y=z,col=ngs,shape=group))+
+  scale_x_continuous(breaks=seq(25,75,25))+
+  geom_jitter(size=3)+
+  scale_color_manual(values=c("#162115","#F8766D"),
+                     labels=c("1","2"))+
+  ylab("z")+xlab("Age at DNA sampling")+ggtitle("JAK2 V617F")+
+  theme(legend.position = "none")+
+  theme(axis.text = element_text(size=30))+
+  theme(axis.title = element_text(size = 30))+
+  theme(plot.title = element_text(size = 30,hjust = 0.5))
+
+#plot2
+ggplot(intensity_dat, aes(x=1-theta, fill=group)) + geom_density(alpha=0.5)+
+  scale_fill_manual(     values = c("#2ac075","#f06261"),
+                         name="pvalue=0.05",
+                         breaks=c("0","1"),
+                         labels=c("component1", "component2"))+
+  ylab("Density")+xlab("Probe Intensity")+ggtitle("JAK2_V617F")+
+  theme(axis.text = element_text(size=25))+
+  theme(axis.title = element_text(size = 25))+
+  theme(plot.title = element_text(size = 25))+
+  theme(legend.text = element_text(size=25),
+        legend.title = element_text(size=25))
+
+#plot3
+intensity_dat$agegroup <-cut(intensity_dat$age, breaks=c(-1,20,30,40,50,60,70,80,90))
+levels(intensity_dat$agegroup)=c("<=20","(20,30]","(30,40]","(40,50]","(50,60]","(60,70]","(70,80]","(80,90]")
+library(ggpubr)
+library(dplyr)
+
+perc_1=intensity_dat %>%
+  group_by(agegroup, group) %>%
+  summarise (n = n()) %>%
+  mutate(freq = n / sum(n))
+
+ggplot(subset(perc_1,group==1),
+       aes(x=agegroup,y=freq))+
+  geom_point(size=8)+
+  #geom_histogram(stat="count")+
+  #scale_fill_manual(   values = c("#162115","#162115","#162115","#162115","#162115","#162115","#162115","#162115"),
+  #                     name="age group",
+  #                     breaks=c("<=20","(20,30]","(30,40]","(40,50]","(50,60]","(60,70]","(70,80]","(80,90]"),
+  #                     labels=c("<=20","(20,30]","(30,40]","(40,50]","(50,60]","(60,70]","(70,80]","(80,90]"))+
+  ylab("Incidence rate per 10 years")+xlab("Age at DNA sampling")+ggtitle("JAK2 V617F")+ 
+  theme(legend.position = "none")+
+  theme(axis.text = element_text(size=25))+
+  theme(axis.title = element_text(size = 30))+
+  theme(plot.title = element_text(size = 30,hjust = 0.5))
+
+write.table(intensity_dat,file = "JAK2_Mutation_Carriers_0.05.csv",sep = ",",row.names = FALSE,col.names = TRUE)
+
+#===Batch Effect===#
+intensity_dat$batch_id=as.factor(intensity_dat$batch_id)
+levels(intensity_dat$batch_id)[1]="Mixed Batches"
+library(ggplot2)
+#boxplot of intensity in each batch overall population which ignores the outliers
+ggplot(intensity_dat,aes(x=batch_id,y=1-theta))+
+  geom_boxplot(color="black",size=0.2,outlier.shape = NA)+
+  coord_flip()+
+  xlab("Batch")+ylab("Probe Intensity")+ggtitle("Intensity Boxplot for total population")
+#The batch "Cox_MEGA_07_5000_Shadow"
+#boxplot of intensity in each batch overall population which does not ignore the outliers
+ggplot(intensity_dat,aes(x=batch_id,y=1-theta))+
+  geom_boxplot(color="black",size=0.2)+
+  coord_flip()+
+  xlab("Batch")+ylab("Probe Intensity")+ggtitle("Intensity Boxplot for total population")
+
+#mylist=data.frame("grid"=intensity_dat$grid,"grid"=intensity_dat$grid)
+#write.table(mylist,file = "mylist.txt",sep = "\t",row.names = FALSE,col.names = FALSE,quote = FALSE)
+
+
+#===========================================================================================
+#===create a file of case/control that will be used in phewas===#
+table(intensity_dat$group)
+genotypes=data.frame("GRID"=intensity_dat$grid,"group"=intensity_dat$group)
+#setwd("~/phewas")
+write.table(genotypes,file = "case_control_list_JAK2_mutation.csv",row.names=FALSE,col.names = TRUE,sep = ",")
+
+
+
+#==================================================
+#==================================================
+#==================================================
+#============DNMT3A================#
+#==================================#
+#==================================#
+#read in DNMT3A data
+setwd("~/MyProjects/PI_SAVONA/CHIP_PheWAS/COMMON/data/MEGA")
+intensity_dnmt3a=read.table("exm177507_intensity.csv",header = TRUE,sep = ",")
+intensity_dnmt3a=intensity_dnmt3a[which(!is.na(intensity_dnmt3a$theta)),]
+intensity_dnmt3a=intensity_dnmt3a[!duplicated(intensity_dnmt3a$grid),]
+intensity_dnmt3a$`1-theta`=1-intensity_dnmt3a$theta
+
+#===merge with demographics data(Age at DNA sampling)===#
+#demographic_dat=function(){
+#  dat=load("GRID_DEMOGRAPHICS.Aug2017.RData")
+#  return(get(dat))
+#}
+#demo_dat=demographic_dat()
+library(readxl)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+demo_dat=read_excel("Xu_PM_Phenotype.2018April25.xlsx")
+colnames(demo_dat)[1]="grid"
+demo_dat=demo_dat[!duplicated(demo_dat$grid),]
+intensity_dnmt3a=merge(intensity_dnmt3a,demo_dat[,c("grid","DOB","SHIFTED_SAMPLE_ACCEPTED_DT")],by="grid",sort=FALSE)
+intensity_dnmt3a$age=as.numeric(floor((as.Date(intensity_dnmt3a$SHIFTED_SAMPLE_ACCEPTED_DT)-as.Date(intensity_dnmt3a$DOB))/365))
+
+#####1.
+##apply the same cut-off of 1-theta=0.076 to dnmt3a
+intensity_dnmt3a$group=as.factor(ifelse(intensity_dnmt3a$`1-theta`<0.076,0,1))
+table(intensity_dnmt3a$group)
+#have a look
+library(ggplot2)
+#plot1
+ggplot(intensity_dnmt3a,
+       aes(x=age,y=`1-theta`,col=group))+
+  scale_x_continuous(breaks=seq(25,75,25))+
+  geom_jitter(size=3)+
+  scale_color_manual(values=c("#162115","#F8766D"),
+                     labels=c("1","2"))+
+  ylab("1-theta")+xlab("Age at DNA sampling")+ggtitle("DNMT3A_exm177507")+
+  theme(legend.position = "none")+
+  theme(axis.text = element_text(size=30))+
+  theme(axis.title = element_text(size = 30))+
+  theme(plot.title = element_text(size = 30,hjust = 0.5))
+
+#####2.
+#if applying same z cut-off
+#===fit distribution for the people aged at sampling <=40===#
+library(MASS)
+intensity_dat1_dnmt3a=subset(intensity_dnmt3a,age<=40)
+intensity_dat2_dnmt3a=subset(intensity_dnmt3a,age>40)
+#pvalue=c(0.90,0.95,0.99,0.995,0.999)
+#estimate mean and sd
+set.seed(123)
+fit=huber(intensity_dat1_dnmt3a$`1-theta`,k=1.5)
+#calculate alpha and beta for a beta distribution from mean and sd estimated from huber
+mean=as.numeric(fit[[1]])
+sd=as.numeric(fit[[2]])
+alpha=((1-mean)/(sd^2)-1/mean)*(mean^2)
+beta=alpha*(1/mean-1)
+#if get p-values for each subject from beta distribution
+intensity_dnmt3a$p_value=pbeta(intensity_dnmt3a$`1-theta`,alpha,beta,lower.tail = FALSE)
+#if get p-values for each subject from normal distribution
+#intensity_dat$p_value=pnorm(intensity_dat$`1-theta`,mean,sd,lower.tail = FALSE)
+#round p-value that is 0 to 2.225074e-308(smallest representable number in R), otherwise will be infinite of z
+intensity_dnmt3a$p_value[which(intensity_dnmt3a$p_value==0)]=2.225074e-308
+#transform p-value to z
+intensity_dnmt3a$z=qnorm(intensity_dnmt3a$p_value,mean=0,sd=1,lower.tail = FALSE)
+##apply the same threshold of z=3.772346 to dnmt3a
+intensity_dnmt3a$group=as.factor(ifelse(intensity_dnmt3a$z<3.772346,0,1))
+table(intensity_dnmt3a$group)
+#have a look
+library(ggplot2)
+#plot1
+ggplot(intensity_dnmt3a,
+       aes(x=age,y=z,col=group))+
+  scale_x_continuous(breaks=seq(25,75,25))+
+  geom_jitter(size=3)+
+  scale_color_manual(values=c("#162115","#F8766D"),
+                     labels=c("1","2"))+
+  ylab("z")+xlab("Age at DNA sampling")+ggtitle("DNMT3A_exm177507")+
+  theme(legend.position = "none")+
+  theme(axis.text = element_text(size=30))+
+  theme(axis.title = element_text(size = 30))+
+  theme(plot.title = element_text(size = 30,hjust = 0.5))
+
+
+#===============================================================
+#===create a file of case/control that will be used in phewas===#
+table(intensity_dnmt3a$group)
+genotypes=data.frame("GRID"=intensity_dnmt3a$grid,"group"=intensity_dnmt3a$group)
+setwd("~/phewas")
+write.table(genotypes,file = "case_control_list_dnmt3a_1-theta.csv",row.names=FALSE,col.names = TRUE,sep = ",")
+
+
+#===============================================================#
+#=================Used for cluster analysis=====================#
+#=======46/1 haplotype
+library(plyr)
+setwd("~/gwas/jak2_dnmt3a")
+haplotype=read.table("haplotype_2.phase-H1",header = T)
+haplotype=haplotype[which(haplotype$BEST==1),]
+table(haplotype$POSTPROB)
+phenotype=read.table("cleanchr_qc.fam",header = FALSE)
+colnames(phenotype)[1]="FID"
+haplotype=join(haplotype,phenotype[,c(1,6)],by="FID")
+colnames(haplotype)[8]="phenotype"
+
+haplotype_mutation=subset(haplotype,phenotype==2)
+table(haplotype_mutation$haplotype)
+nrow(haplotype_mutation[which(haplotype_mutation$HAP1=="TCTT" & haplotype_mutation$HAP2=="GGCC"),])
+haplotype_nomutation=subset(haplotype,phenotype==1)
+table(haplotype_nomutation$haplotype)
+nrow(haplotype_nomutation[which(haplotype_nomutation$HAP1=="TCTT" & haplotype_nomutation$HAP2=="TCTT"),])
+
+haplotype_nona=haplotype[which(!is.na(haplotype$phenotype)),]
+table(haplotype_nona$haplotype)
+nrow(haplotype_nona[which(haplotype_nona$HAP1=="TCTT" & haplotype_nona$HAP2=="TCTT"),])
+haplotype_nona$haplotype=paste(haplotype_nona$HAP1,"/",haplotype_nona$HAP2,sep = "")
+
+write.table(haplotype_nona[,c(1,2,4,5,6,8,9)],file = "individual_haplotype_phase.csv",row.names = FALSE,col.names = TRUE,sep = ",")
+
+#==============TERT=============#
+library(plyr)
+setwd("~/gwas/jak2_dnmt3a")
+haplotype=read.table("haplotype_tert.phase-H1",header = T)
+haplotype=haplotype[which(haplotype$BEST==1),]
+phenotype=read.table("cleanchr_qc.fam",header = FALSE)
+colnames(phenotype)[1]="FID"
+haplotype=join(haplotype,phenotype[,c(1,6)],by="FID")
+colnames(haplotype)[8]="phenotype"
+haplotype$haplotype=paste(haplotype$HAP1,"/",haplotype$HAP2,sep = "")
+
+haplotype_mutation=subset(haplotype,phenotype==2)
+nrow(haplotype_mutation[which(haplotype_mutation$haplotype=="AA/CG"),])
+haplotype_nomutation=subset(haplotype,phenotype==1)
+nrow(haplotype_nomutation[which(haplotype_nomutation$haplotype=="CG/CG"),])
+table(haplotype_mutation$haplotype)/360
+table(haplotype_nomutation$haplotype)/48377
+haplotype_nona=haplotype[which(!is.na(haplotype$phenotype)),]
+table(haplotype_nona$haplotype)/48737
+
+write.table(haplotype_nona[,c(1,2,4,5,6,8,9)],file = "individual_haplotype_phase_tert.csv",row.names = FALSE,col.names = TRUE,sep = ",")
+
+
+#=======================================================#
+#================VAF for all MEGA samples===============#
+#fit regression on NGS(VAF)~z(or 1-theta) based on 149 NGS data
+#examine the ditribution of outcome
+#many 0 values, ignore these 0 values???
+#works on 1-theta
+#reg=lm(VAF~`1-theta`,data = ngs_mega[,c("VAF","1-theta")])
+#summary(reg)
+reg_glm=glm(VAF~`1-theta`,family = gaussian,data = ngs_mega[which(ngs_mega$GT==1),c("VAF","1-theta")])
+summary(reg_glm)
+
+#works on z
+reg_glm_z=glm(VAF~z,family = gaussian,data = ngs_mega[which(ngs_mega$GT==1),c("VAF","z")])
+summary(reg_glm_z)
+
+#examine which model fits better, z or 1-theta
+pre_VAF_ngs=predict(reg_glm,type = "response")
+chisq.test(ngs_mega[which(ngs_mega$GT==1),]$VAF,unname(pre_VAF_ngs))
+ks.test(ngs_mega[which(ngs_mega$GT==1),]$VAF,unname(pre_VAF_ngs))
+
+pre_VAF_ngs_z=predict(reg_glm_z,type = "response")
+chisq.test(ngs_mega[which(ngs_mega$GT==1),]$VAF,pre_VAF_ngs_z)
+ks.test(ngs_mega[which(ngs_mega$GT==1),]$VAF,unname(pre_VAF_ngs_z))
+
+#predict VAF for all mega
+predict_mega=data.frame("z"=intensity_dat[which(intensity_dat$group_z3.77==1),"z"])
+colnames(predict_mega)[1]="z"
+intensity_dat[which(intensity_dat$group_z3.77==1),"VAF_z3.77"]=predict(reg_glm_z, newdata = predict_mega,type = "response")
+intensity_dat[which(is.na(intensity_dat$VAF_z3.77)),"VAF_z3.77"]=0
+#predict_mega_z=data.frame("z"=intensity_dat[which(intensity_dat$group==1),"z"])
+#intensity_dat[which(intensity_dat$group==1),"VAF"]=predict(reg_glm_z, newdata = predict_mega_z,type = "response")
+#intensity_dat[which(is.na(intensity_dat$VAF)),"VAF"]=0
+
+#write genotypes(VAF for all MEGA) to do GWAS
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+genotypes=data.frame("id"=intensity_dat$grid,"VAF"=intensity_dat$VAF, "mutation"=intensity_dat$group)
+write.table(genotypes,file = "VAF_JAK2_MEGA_1-theta.csv",col.names = TRUE,row.names = FALSE,sep = ",",quote = FALSE)
+
+
+#change the phenotype column in cleanchr_qc.fam to do gwas
+#question: how to deal with many outcomes are 0?
+
+
+#=================================TWO SNPs PheWAS analysis===============================#
+#========================================================================================#
+#two SNPs phewas
+setwd("/proj/TBILAB/Projects/BV221/.common/data")
+snpraw=read.table("cleanchr_qc_sig5e-8.raw",header = TRUE)
+#exm.rs10974944
+which(colnames(snpraw)=="exm.rs10974944_G")
+genotypes=snpraw[,c(1,43)]
+write.table(genotypes,file = "rs10974944.csv",col.names = TRUE,row.names = FALSE,sep = ",")
+#rs2736100_A
+which(colnames(snpraw)=="rs2736100_A")
+genotypes=snpraw[,c(1,7)]
+write.table(genotypes,file = "rs2736100.csv",col.names = TRUE,row.names = FALSE,sep = ",")
+
+#=======different genetic model=======#
+#1. recessive model
+setwd("/proj/TBILAB/Projects/BV221/.common/data")
+snpraw=read.table("cleanchr_qc_sig5e-8.raw",header = TRUE)
+#exm.rs10974944
+which(colnames(snpraw)=="exm.rs10974944_G")
+genotypes=snpraw[,c(1,43)]
+genotypes$exm.rs10974944_G=ifelse(genotypes$exm.rs10974944_G==2,1,0) 
+table(genotypes$exm.rs10974944_G)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+write.table(genotypes,file = "exm_rs10974944_recessive.csv",col.names = TRUE,row.names = FALSE,sep = ",")
+#rs2736100_A
+which(colnames(snpraw)=="rs2736100_A")
+genotypes=snpraw[,c(1,7)]
+genotypes$rs2736100_A=ifelse(genotypes$rs2736100_A==2,1,0) 
+table(genotypes$rs2736100_A)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+write.table(genotypes,file = "rs2736100_recessive.csv",col.names = TRUE,row.names = FALSE,sep = ",")
+
+#2. dominant model
+setwd("/proj/TBILAB/Projects/BV221/.common/data")
+snpraw=read.table("cleanchr_qc_sig5e-8.raw",header = TRUE)
+#exm.rs10974944
+which(colnames(snpraw)=="exm.rs10974944_G")
+genotypes=snpraw[,c(1,43)]
+genotypes$exm.rs10974944_G[which(genotypes$exm.rs10974944_G==2)]=1 
+table(genotypes$exm.rs10974944_G)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+write.table(genotypes,file = "exm_rs10974944_dominant.csv",col.names = TRUE,row.names = FALSE,sep = ",")
+#rs2736100_A
+which(colnames(snpraw)=="rs2736100_A")
+genotypes=snpraw[,c(1,7)]
+genotypes$rs2736100_A[which(genotypes$rs2736100_A==2)]=1 
+table(genotypes$rs2736100_A)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+write.table(genotypes,file = "rs2736100_dominant.csv",col.names = TRUE,row.names = FALSE,sep = ",")
+
+#3. over dominant
+setwd("/proj/TBILAB/Projects/BV221/.common/data")
+snpraw=read.table("cleanchr_qc_sig5e-8.raw",header = TRUE)
+#exm.rs10974944
+which(colnames(snpraw)=="exm.rs10974944_G")
+genotypes=snpraw[,c(1,43)]
+genotypes$exm.rs10974944_G[which(genotypes$exm.rs10974944_G==2)]=0 
+table(genotypes$exm.rs10974944_G)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+write.table(genotypes,file = "exm_rs10974944_overdominant.csv",col.names = TRUE,row.names = FALSE,sep = ",")
+#rs2736100_A
+which(colnames(snpraw)=="rs2736100_A")
+genotypes=snpraw[,c(1,7)]
+genotypes$rs2736100_A[which(genotypes$rs2736100_A==2)]=0
+table(genotypes$rs2736100_A)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+write.table(genotypes,file = "rs2736100_overdominant.csv",col.names = TRUE,row.names = FALSE,sep = ",")
+
+
+#===============================Change the cut-off of mutation carrier=====================#
+#==========================================================================================#
+#change cut-off of z to 2.8
+intensity_dat$group_z_2.8=as.factor(ifelse(intensity_dat$z<2.8,0,1))
+#intensity_dat$ngs=as.factor(ifelse(intensity_dat$grid %in% ngs_mega[which(ngs_mega$GT==1),"grid"],1,0))
+table(intensity_dat$group_z_2.8)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+write.table(intensity_dat[,c("grid","group")],file="mutation_id_group_cutoff_z2.8.csv",col.names = TRUE,row.names = FALSE,sep = ",")
+
+#To do phewas after  
+
+
+
+
+#===============================Within cluster analysis====================================#
+#==========================================================================================#
+#=====read in cluster file
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+clusterid=read.table("jak2_grid_to_sbm_cluster.csv",header = TRUE,sep = ",")
+level21=paste("0-",c(0,25,27,29,36,50,10,2,31,7,11,26,4,41,24,33,6,8,12,17,19,20,34,43,9,32,37,38,44,47,52,15,35,42),sep = "")
+level22=paste("0-",c(14,21,3,30,39,40,45,46,48,49,1,13,16,18,22,23,28,5,51),sep = "")
+
+clusterid_21=subset(clusterid,l0 %in% level21)
+colnames(clusterid_21)[1]="grid"
+clusterid_21=join(clusterid_21,intensity_dat[,c("grid","group_z2.8")],by="grid")
+#intensity_dat$group_z_3.77=as.factor(ifelse(intensity_dat$z<ngs_mega[which(1-spec_c+sens==max(1-spec_c+sens)),"z"],0,1))
+clusterid_21=join(clusterid_21,intensity_dat[,c("grid","group_z3.77")],by="grid")
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+#vaf=read.table("VAF_JAK2_MEGA_z.csv",header = TRUE,sep = ",")
+#colnames(vaf)[1]="grid"
+clusterid_21=join(clusterid_21,intensity_dat[,c("grid","VAF_z2.8","VAF_z3.77")],by="grid")
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+write.table(clusterid_21,file="level2_cluster1_vaf.csv",col.names = TRUE,row.names = FALSE,sep = ",")
+
+clusterid_22=subset(clusterid,l0 %in% level22)
+colnames(clusterid_22)[1]="grid"
+clusterid_22=join(clusterid_22,intensity_dat[,c("grid","group_z2.8")],by="grid")
+#intensity_dat$group_z_3.77=as.factor(ifelse(intensity_dat$z<ngs_mega[which(1-spec_c+sens==max(1-spec_c+sens)),"z"],0,1))
+clusterid_22=join(clusterid_22,intensity_dat[,c("grid","group_z3.77")],by="grid")
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+vaf=read.table("VAF_JAK2_MEGA_z.csv",header = TRUE,sep = ",")
+colnames(vaf)[1]="grid"
+clusterid_22=join(clusterid_22,intensity_dat[,c("grid","VAF_z2.8","VAF_z3.77")],by="grid")
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+write.table(clusterid,file="level2_cluster2_vaf.csv",col.names = TRUE,row.names = FALSE,sep = ",")
+
+#==Within cluster phewas analysis
+genotypes=clusterid_21[,c("grid","group_z3.77")]
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+
+
+#==Within cluster gwas analysis
+setwd("/proj/TBILAB/Projects/BV221/.common/data")
+fam=read.table("cleanchr_qc_sig5e-8.fam",header = FALSE)
+colnames(fam)[1]="grid"
+fam=join(fam,genotypes,by="grid")
+fam=fam[,c(1:5,7)]
+fam$group_z3.77=ifelse(fam$group_z3.77==1,2,1)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+write.table(fam,file = "cleanchr_qc.fam",col.names = FALSE,row.names = FALSE,sep = "\t",quote = FALSE)
+
+
+
+#====================================================Carrier Only=======================================================#
+#==Within carrier only clusters analysis
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+carrier_clusterid=read.table("node_to_clust_wide.csv",header = TRUE,sep = ",")
+carrier_clusterid=carrier_clusterid[c(1009:1394),]
+
+##carrier to control
+#level1-0
+carrier_clusterid_10=carrier_clusterid[which(carrier_clusterid$l1=="1-0"),]
+colnames(carrier_clusterid_10)[1]="grid"
+#clusterid_11=join(carrier_clusterid_11,intensity_dat[,c("grid","group_z3.77")],by="grid")
+#intensity_dat$group_z_3.77=as.factor(ifelse(intensity_dat$z<ngs_mega[which(1-spec_c+sens==max(1-spec_c+sens)),"z"],0,1))
+carrier_clusterid_10=join(carrier_clusterid_10,intensity_dat[,c("grid","group_z3.77")],by="grid")
+carrier_clusterid_10=carrier_clusterid_10[,c("grid","group_z3.77")]
+colnames(carrier_clusterid_10)[2]="group"
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+id=read.table("matched_ID_group.csv",header = TRUE,sep = ",")
+controls=id[which(id$group==0),]
+colnames(controls)[1]="grid"
+casecontrol_cluster10=rbind(carrier_clusterid_10,controls)
+#==Within cluster phewas analysis
+genotypes=casecontrol_cluster10
+#==Within cluster gwas analysis
+setwd("/proj/TBILAB/Projects/BV221/.common/data")
+fam=read.table("cleanchr_qc_sig5e-8.fam",header = FALSE)
+colnames(fam)[1]="grid"
+fam=join(fam,casecontrol_cluster10,by="grid")
+fam=fam[,c(1:5,7)]
+fam$group=ifelse(fam$group==1,2,1)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+write.table(fam,file = "cleanchr_qc.fam",col.names = FALSE,row.names = FALSE,sep = "\t",quote = FALSE)
+
+#level1-1
+carrier_clusterid_11=carrier_clusterid[which(carrier_clusterid$l1=="1-1"),]
+colnames(carrier_clusterid_11)[1]="grid"
+#clusterid_11=join(carrier_clusterid_11,intensity_dat[,c("grid","group_z3.77")],by="grid")
+#intensity_dat$group_z_3.77=as.factor(ifelse(intensity_dat$z<ngs_mega[which(1-spec_c+sens==max(1-spec_c+sens)),"z"],0,1))
+carrier_clusterid_11=join(carrier_clusterid_11,intensity_dat[,c("grid","group_z3.77")],by="grid")
+carrier_clusterid_11=carrier_clusterid_11[,c("grid","group_z3.77")]
+colnames(carrier_clusterid_11)[2]="group"
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+id=read.table("matched_ID_group.csv",header = TRUE,sep = ",")
+controls=id[which(id$group==0),]
+colnames(controls)[1]="grid"
+casecontrol_cluster11=rbind(carrier_clusterid_11,controls)
+#==Within cluster gwas analysis
+setwd("/proj/TBILAB/Projects/BV221/.common/data")
+fam=read.table("cleanchr_qc_sig5e-8.fam",header = FALSE)
+colnames(fam)[1]="grid"
+fam=join(fam,casecontrol_cluster11,by="grid")
+fam=fam[,c(1:5,7)]
+fam$group=ifelse(fam$group==1,2,1)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+write.table(fam,file = "cleanchr_qc.fam",col.names = FALSE,row.names = FALSE,sep = "\t",quote = FALSE)
+#==Within cluster phewas analysis
+genotypes=casecontrol_cluster11
+
+
+#level1 carrier to carrier
+carrier_clusterid_level1=list()
+casecontrol_cluster_level1=list()
+for (i in paste("1-",c(0,1),sep="")) {
+  carrier_clusterid_level1[[i]]=carrier_clusterid[which(carrier_clusterid$l1==i),]
+  colnames(carrier_clusterid_level1[[i]])[1]="grid"
+  carrier_clusterid_level1[[i]]=join(carrier_clusterid_level1[[i]],intensity_dat[,c("grid","group_z3.77")],by="grid")
+  carrier_clusterid_level1[[i]]=carrier_clusterid_level1[[i]][,c("grid","group_z3.77")]
+  colnames(carrier_clusterid_level1[[i]])[2]="group"
+  setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+  id=read.table("matched_ID_group.csv",header = TRUE,sep = ",")
+  controls=id[which(id$group==1 & (!id$id %in% carrier_clusterid_level1[[i]]$grid)),]
+  colnames(controls)[1]="grid"
+  controls$group=ifelse(controls$group==1,0,1)
+  casecontrol_cluster_level1[[i]]=rbind(carrier_clusterid_level1[[i]],controls)
+}
+#==Within cluster gwas analysis
+setwd("/proj/TBILAB/Projects/BV221/.common/data")
+fam=read.table("cleanchr_qc_sig5e-8.fam",header = FALSE)
+colnames(fam)[1]="grid"
+fam=join(fam,casecontrol_cluster_level1[[2]],by="grid")
+fam=fam[,c(1:5,7)]
+fam$group=ifelse(fam$group==1,2,1)
+table(fam$group)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+write.table(fam,file = "cleanchr_qc.fam",col.names = FALSE,row.names = FALSE,sep = "\t",quote = FALSE)
+#==Within cluster phewas analysis
+genotypes=casecontrol_cluster_level1[[2]]
+
+#level0
+##carrier to control
+carrier_clusterid_level0=list()
+casecontrol_cluster_level0=list()
+for (i in paste("0-",c(0,1,2,3,4,5,6,7,8,9,10,11),sep="")) {
+  carrier_clusterid_level0[[i]]=carrier_clusterid[which(carrier_clusterid$l0==i),]
+  colnames(carrier_clusterid_level0[[i]])[1]="grid"
+  carrier_clusterid_level0[[i]]=join(carrier_clusterid_level0[[i]],intensity_dat[,c("grid","group_z3.77")],by="grid")
+  carrier_clusterid_level0[[i]]=carrier_clusterid_level0[[i]][,c("grid","group_z3.77")]
+  colnames(carrier_clusterid_level0[[i]])[2]="group"
+  setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+  id=read.table("matched_ID_group.csv",header = TRUE,sep = ",")
+  controls=id[which(id$group==0),]
+  colnames(controls)[1]="grid"
+  casecontrol_cluster_level0[[i]]=rbind(carrier_clusterid_level0[[i]],controls)
+}
+#==Within cluster phewas analysis
+genotypes=casecontrol_cluster_level0[[2]]
+#==Within cluster gwas analysis
+setwd("/proj/TBILAB/Projects/BV221/.common/data")
+fam=read.table("cleanchr_qc_sig5e-8.fam",header = FALSE)
+colnames(fam)[1]="grid"
+fam=join(fam,casecontrol_cluster_level0[[12]],by="grid")
+fam=fam[,c(1:5,7)]
+fam$group=ifelse(fam$group==1,2,1)
+table(fam$group)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+write.table(fam,file = "cleanchr_qc.fam",col.names = FALSE,row.names = FALSE,sep = "\t",quote = FALSE)
+
+#level0 carrier to carrier
+carrier_clusterid_level0=list()
+casecontrol_cluster_level0=list()
+for (i in paste("0-",c(0,1,2,3,4,5,6,7,8,9,10,11),sep="")) {
+  carrier_clusterid_level0[[i]]=carrier_clusterid[which(carrier_clusterid$l0==i),]
+  colnames(carrier_clusterid_level0[[i]])[1]="grid"
+  carrier_clusterid_level0[[i]]=join(carrier_clusterid_level0[[i]],intensity_dat[,c("grid","group_z3.77")],by="grid")
+  carrier_clusterid_level0[[i]]=carrier_clusterid_level0[[i]][,c("grid","group_z3.77")]
+  colnames(carrier_clusterid_level0[[i]])[2]="group"
+  setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+  id=read.table("matched_ID_group.csv",header = TRUE,sep = ",")
+  controls=id[which(id$group==1 & (!id$id %in% carrier_clusterid_level0[[i]]$grid)),]
+  colnames(controls)[1]="grid"
+  controls$group=ifelse(controls$group==1,0,1)
+  casecontrol_cluster_level0[[i]]=rbind(carrier_clusterid_level0[[i]],controls)
+}
+#==Within cluster gwas analysis
+setwd("/proj/TBILAB/Projects/BV221/.common/data")
+fam=read.table("cleanchr_qc_sig5e-8.fam",header = FALSE)
+colnames(fam)[1]="grid"
+fam=join(fam,casecontrol_cluster_level0[[12]],by="grid")
+fam=fam[,c(1:5,7)]
+fam$group=ifelse(fam$group==1,2,1)
+table(fam$group)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+write.table(fam,file = "cleanchr_qc.fam",col.names = FALSE,row.names = FALSE,sep = "\t",quote = FALSE)
+#==Within cluster phewas analysis
+genotypes=casecontrol_cluster_level0[[7]]
+
+#==========Within mutation carriers, 46/1 haplotype vs non 46/1 haplotype==========#
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+haplotype46_1=read.table("individual_haplotype_phase.csv",header = TRUE,sep = ",")
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+carrier_clusterid=read.table("node_to_clust_wide.csv",header = TRUE,sep = ",")
+carrier_clusterid=carrier_clusterid[c(1009:1394),]
+colnames(carrier_clusterid)[1]="FID"
+haplotype46_1=merge(haplotype46_1,carrier_clusterid,by="FID",sort = FALSE)
+haplotype46_1$group=ifelse(haplotype46_1$haplotype=="GGCC/GGCC",1,0)
+table(haplotype46_1$group)
+#phewas
+genotypes=haplotype46_1[,c("FID","group")]
+#gwas
+setwd("/proj/TBILAB/Projects/BV221/.common/data")
+fam=read.table("cleanchr_qc_sig5e-8.fam",header = FALSE)
+colnames(fam)[1]="grid"
+colnames(haplotype46_1)[1]="grid"
+fam=join(fam,haplotype46_1[,c("grid","group")],by="grid")
+fam=fam[,c(1:5,7)]
+fam$group=ifelse(fam$group==1,2,1)
+table(fam$group)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+write.table(fam,file = "cleanchr_qc.fam",col.names = FALSE,row.names = FALSE,sep = "\t",quote = FALSE)
+#==========Within mutation carriers, 46/1 haplotype vs non 46/1 haplotype==========#
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+tert=read.table("individual_haplotype_phase_tert.csv",header = TRUE,sep = ",")
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+carrier_clusterid=read.table("node_to_clust_wide.csv",header = TRUE,sep = ",")
+carrier_clusterid=carrier_clusterid[c(1009:1394),]
+colnames(carrier_clusterid)[1]="FID"
+tert=merge(tert,carrier_clusterid,by="FID",sort = FALSE)
+tert$group=ifelse(tert$haplotype=="CG/CG",1,0)
+table(tert$group)
+#phewas
+genotypes=tert[,c("FID","group")]
+#gwas
+setwd("/proj/TBILAB/Projects/BV221/.common/data")
+fam=read.table("cleanchr_qc_sig5e-8.fam",header = FALSE)
+colnames(fam)[1]="grid"
+colnames(tert)[1]="grid"
+fam=join(fam,tert[,c("grid","group")],by="grid")
+fam=fam[,c(1:5,7)]
+fam$group=ifelse(fam$group==1,2,1)
+table(fam$group)
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/MEGA")
+write.table(fam,file = "cleanchr_qc.fam",col.names = FALSE,row.names = FALSE,sep = "\t",quote = FALSE)
+
+
+
+#phewas
+#==========Prepare the input file==========#
+#setwd("~/phewas")
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/phewas")
+#genotypes=read.table("rs2736100_overdominant.csv",header = TRUE,sep = ",")
+colnames(genotypes)[1]="id"
+str(genotypes)
+
+#prepare the phenotype file
+phenotypes_dat=function(){
+  dat=load("match_phenotypes_dat_JAK2.RData")
+  return(get(dat))
+}
+phenotypes_dat=phenotypes_dat()
+str(phenotypes_dat)
+#update phenotypes file
+phenotypes_dat=phenotypes_dat[phenotypes_dat@Dimnames[[1]] %in% genotypes[,"id"],]
+#colnames(phenotypes_dat)=substring(colnames(phenotypes_dat),2)
+genotypes=genotypes[genotypes$id %in% phenotypes_dat@Dimnames[[1]],]
+
+demo_dat=read.table("match_demo_dat_JAK2.csv",header = TRUE,sep = ",")
+demo_dat=demo_dat[which(demo_dat$id %in% phenotypes_dat@Dimnames[[1]]),]
+rownames(demo_dat)=demo_dat$id
+colnames(demo_dat)[1]="id"
+head(demo_dat)
+
+
+#phenotypes_dat=as.data.frame(as.matrix(phenotypes_dat))
+id=phenotypes_dat@Dimnames[[1]]
+phecode=phenotypes_dat@Dimnames[[2]]
+#matrix to a dgCMatrix
+#setAs("lgCMatrix","dgCMatrix",function(from) new("dgCMatrix", i = from@i, p = from@p,
+#                                                 x = as.double(from@x),
+#                                                 Dim = from@Dim, Dimnames = from@Dimnames))
+#message("begin transforming to dgCMatrix")
+#phenotypes_dat=as(phenotypes_dat,"dgCMatrix")
+#phenotypes_dat=as.spam.dgCMatrix(phenotypes_dat)
+message("transform to dataframe(matrix)")
+phenotypes_dat=data.frame(as.matrix(phenotypes_dat))
+colnames(phenotypes_dat)=phecode
+phenotypes_dat$id=id
+#have a look of phenotype data
+head(phenotypes_dat[1:20,1:20])
+head(phenotypes_dat$id)
+#update pheno_dat data
+message("finish cleaning phenotype data")
+str(phenotypes_dat)
+
+#the number of cases at least larger than 50
+#after applying at least 50 cases
+#phenotype50=apply(phenotypes_dat[,-1817], 2, function(x) sum(x,na.rm = TRUE)>=50)
+#phenotype50=which(phenotype50=="TRUE")
+results=phewas(phenotypes =phenotypes_dat, genotypes = genotypes, 
+               cores = 20,  covariates = demo_dat[,c("id","EHRAge","SEX","RACE","phenome_burden","age")],
+               significance.threshold = "bonferroni", additive.genotypes = FALSE)
+head(results)
+#arrange the results
+library(readxl)
+phecode_description=read_excel("phecode_description.xlsx")
+phecode_description=phecode_description[which(!duplicated(phecode_description$PheCode)),]
+colnames(results)[1]="PheCode"
+results_description=merge(results,phecode_description,by="PheCode",sort = FALSE)
+results_description=results_description[,c(1,19,10,11,4,5,6,7)]
+colnames(results_description)=c("PheCode (v1.2)","Descripton","n_cases","n_controls","beta","SE","OR","pvalue")
+results_description=results_description[order(results_description$pvalue),]
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/results/carriercluster")
+write.table(results_description,file = "tert_in_carriers.txt",row.names = FALSE,col.names = TRUE,quote = FALSE,sep = "\t")
+#write.table(results_description,file = paste(dir,"results_description.csv",sep=""),row.names=FALSE,col.names=TRUE,quote = FALSE,sep = ",")
+
+#plot
+colnames(results)[1]="phenotype"
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/graph/carriercluster")
+png("tert_in_carriers.png",width = 1000,height = 800)
+phewasManhattan(results, annotate.angle=0,annotate.level=5*10^-2,title="PheWAS Manhattan Plot")
+dev.off()
+
+
+
+
+
+#=================================to increase # of SNPs used in PRS=============================#
+#===============================================================================================#
+setwd("/proj/PI_SAVONA/Projects/CHIP_PheWAS/.common/data/results")
+sigresults=read.table("JAK2GWAS_5e-5.csv",header = TRUE,sep = ",")
+sigresults$OR=log(sigresults$OR)
+colnames(sigresults)[7]="logOR"
+chr9=sigresults[which(sigresults$CHR==9),]
+chr9=chr9[which(4985086<=chr9$BP & chr9$BP<=5235304),]
+chr5=sigresults[which(sigresults$CHR==5),]
+chr5=chr5[which(1253167<=chr5$BP & chr5$BP<=1295047),]
+
+write.table(sigresults[,c(2,4,7)],file = "sigallsnpprs_logOR.raw",row.names = FALSE,col.names = FALSE,sep = "\t",quote = FALSE)
+write.table(chr9[,c(2,4,7)],file = "46_1snpprs_logOR.raw",row.names = FALSE,col.names = FALSE,sep = "\t",quote = FALSE)
+write.table(chr5[,c(2,4,7)],file = "tertsnpprs_logOR.raw",row.names = FALSE,col.names = FALSE,sep = "\t",quote = FALSE)
+
+
+
+
+
+
+
+
+
+
+

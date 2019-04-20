@@ -1,0 +1,25 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1555534738837.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "8707936A",
+    "lastKnownWriteTime" : 1555539572,
+    "last_content_update" : 1555539572703,
+    "path" : "~/PheWASExtension/R/add_exclusion.R",
+    "project_path" : "R/add_exclusion.R",
+    "properties" : {
+        "cursorPosition" : "10,23",
+        "scrollLine" : "0"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}
