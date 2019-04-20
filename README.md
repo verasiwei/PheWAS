@@ -48,7 +48,7 @@ A dataframe that should have the column of `id` and the corresponding case/contr
 
 A simple plot shiny app to have a look of different phewas results
 
-![Alt text](https://github.com/tbilab/PheWASExtension/blob/master/phewas_example.png)
+![Alt text](https://github.com/verasiwei/PheWASExtension/blob/master/phewas_example.png)
 
 
 
