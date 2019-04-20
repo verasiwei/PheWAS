@@ -45,7 +45,7 @@ A dataframe that should at least have the column of `id` and some other covariat
 ## Status Data
 A dataframe that should have the column of `id` and the corresponding case/control status.
 
-
+## PheWAS Plot
 A simple plot shiny app to have a look of different phewas results
 
 ![Alt text](https://github.com/verasiwei/PheWASExtension/blob/master/phewas_example.png)
