@@ -50,6 +50,8 @@ A simple plot shiny app to have a look of different phewas results
 
 ![Alt text](https://github.com/tbilab/PheWASExtension/blob/master/phewas_example.png)
 
+![Alt text](https://github.com/tbilab/PheWASExtension/blob/master/gwas_example.png)
+
 
 
 
