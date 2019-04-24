@@ -5,7 +5,7 @@ This is an extension of PheWAS package. It will save a lot of time and be much m
 ## Installation
 
 ```
-$ git clone https://github.com/verasiwei/PheWASExtension
+$ git clone https://github.com/tbilab/PheWASExtension
 ```
 
 Then install the required packages in your environment
