@@ -3,6 +3,8 @@
 library(PheWAS)
 library(ggplot2)
 library(shiny)
+library(plyr)
+library(qqman)
 
 ui <- shinyUI(navbarPage(
   #Title
@@ -44,7 +46,7 @@ ui <- shinyUI(navbarPage(
 
 
 server <- shinyServer(function(input, output){
-  options(shiny.maxRequestSize=1000*1024^2)
+  options(shiny.maxRequestSize=1024*1024^2)
   data <- reactive({
     req(input$result)
     if(is.null(input$result))     return(NULL)
@@ -61,16 +63,17 @@ server <- shinyServer(function(input, output){
   })
 
   output$phewasplot <- renderPlot(
-    phewasManhattan(data(), annotate.angle=0,annotate.level=p(),title="PheWAS Manhattan Plot"))
+    phewas_manhattan(data(),p()))
+
   output$phewastable <- DT::renderDataTable(data(),options=list(pageLength=5))
+
+  plotoutput <- function()
+    {renderPlot(phewasManhattan(data(), annotate.angle=0,annotate.level=p(),title="PheWAS Manhattan Plot"))}
   output$downphewas <- downloadHandler(
-    filename = function(){
-      paste("PheWAS","png",sep = ".")
-    },
+    filename = "phewas.png",
     content = function(file){
       png(file)
-      renderPlot(
-        phewasManhattan(data(), annotate.angle=0,annotate.level=p(),title="PheWAS Manhattan Plot"))
+      plotoutput()
       dev.off()
       contentType = 'image/png'
     }
