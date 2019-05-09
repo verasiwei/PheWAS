@@ -16,7 +16,7 @@ result <- function(result_dat, phecode_description){
   results_description=results_description[,c(1,19,10,11,4,5,6,7)]
   colnames(results_description)=c("phenotype","Descripton",
                                   "n_cases","n_controls","beta","SE","OR","p")
-  results_description=results_description[order(results_description$pvalue),]
+  results_description=results_description[order(results_description$p),]
 
   return(results_description=results_description)
 
