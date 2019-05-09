@@ -16,7 +16,7 @@ phewas_manhattan <- function(dat,pvalue){
   levels(d$color)=color[1:num]
   ggplot(d,aes(x=group,y=logp,col=color))+
     geom_jitter()+
-    geom_label_repel(aes(label=ifelse(logp>as.numeric(-log10(pvalue)),as.character(descripton),"")),hjust=0,vjust=1,size=3,col="black")+
+    geom_label_repel(aes(label=ifelse(logp>as.numeric(-log10(pvalue)),as.character(description),"")),hjust=0,vjust=1,size=3,col="black")+
     xlab("Phenotype")+ylab("-log10(p)")+ggtitle("PheWAS Plot")+
     theme(axis.text.x = element_text(angle = 45, hjust = 1,size=10),
           axis.title.x =element_text(size=10),
