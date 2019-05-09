@@ -3,7 +3,7 @@
 
 phewas_manhattan <- function(dat,pvalue){
   #add the groups and phecode description
-  d=addPhecodeInfo(dat,groupnums = T,groupcolors = T) %>% rename(phenotype=phecode)
+  d=addPhecodeInfo(dat,groupnums = T,groupcolors = T)
   d$logp=-log10(d$p)
   d$color=as.factor(d$color)
   levels(d$color)=c("#FF0000FF","#FF4600FF", "#FF8B00FF" ,"#FFD100FF","#824acd",
