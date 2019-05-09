@@ -13,8 +13,8 @@ result <- function(result_dat, phecode_description){
   phecode_description=phecode_description[which(!duplicated(phecode_description$PheCode)),]
   colnames(result_dat)[1]="PheCode"
   results_description=merge(result_dat,phecode_description,by="PheCode",sort = FALSE)
-  results_description=results_description[,c(1,19,10,11,4,5,6,7)]
-  colnames(results_description)=c("phenotype","Descripton",
+  results_description=results_description[,c(1,2,19,10,11,4,5,6,7)]
+  colnames(results_description)=c("phenotype","variable","Descripton",
                                   "n_cases","n_controls","beta","SE","OR","p")
   results_description=results_description[order(results_description$p),]
 
